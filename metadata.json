@@ -1,0 +1,6 @@
+{
+  "name": "INSPIRE GOLD - Advanced Quantitative Trading System (XAUUSD)",
+  "description": "Sistema algoritmico istituzionale per XAUUSD con analisi avanzata dei volumi (Tick/Real Volume), filtro dinamico ATR & Spread, position sizing su volatilità e motore scalping ad alta frequenza.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

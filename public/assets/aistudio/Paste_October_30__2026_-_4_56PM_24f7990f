@@ -1,0 +1,2116 @@
+/**
+ * EA Studio Expert Advisor Grid
+ *
+ * Exported from Expert Advisor Studio
+ * MQL base code updated on 2026-06-052
+ * Website https://automaticotrading.com/app
+ *
+ * Copyright 2026, https://automaticotrading.com/.
+ *
+ * Risk Disclosure
+ *
+ * Futures and forex trading contains substantial risk and is not for every investor.
+ * An investor could potentially lose all or more than the initial investment.
+ * Risk capital is money that can be lost without jeopardizing ones’ financial security or life style.
+ * Only risk capital should be used for trading and only those with sufficient risk capital should consider trading.
+ *
+ * Grid trading is high-risk and may result in significant account losses!
+ * The original strategy behavior is modified when Grid is enabled.
+ *
+ * Always test thoroughly in the MetaTrader Strategy Tester before live trading.
+ */
+#import "shell32.dll"
+int ShellExecuteW(int hwnd, string lpOperation, string lpFile, string lpParameters, string lpDirectory, int nShowCmd);
+#import
+input string   LicenseKey = "36266170";          // Numero Account License e.g.782482
+bool licenseValid = false;
+datetime ExpireDate = D'2026.11.12';          // Subscription/license expiry date
+string         RenewalWhatsApp = "https://wa.me/35799163253?text=Vorrei rinnovare la licenza EA";
+//+------------------------------------------------------------------+
+//| License validation function                                      |
+//+------------------------------------------------------------------+
+bool CheckLicense()
+  {
+   // 1. Check expiration
+   if(TimeCurrent() > ExpireDate)
+     {
+      Print("EA LICENSE ERROR: Expired on ", TimeToString(ExpireDate));
+      return false;
+     }
+
+   // 2. Build the key that SHOULD be entered for this account
+   string validKey = IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN));
+
+   // Debug line - prints expected key to Journal so you can copy-paste it
+   Print("Expected LicenseKey: ", validKey);
+
+   // 3. Compare entered key vs required key
+   if(LicenseKey != validKey)
+     {
+      Print("EA LICENSE ERROR: Invalid key. You entered: ", LicenseKey, " | Expected: ", validKey);
+      return false;
+     }
+
+   return true;
+  }
+
+
+
+
+#property copyright "Forex Software Ltd."
+#property version   "6.8"
+#property strict
+
+
+
+static input string _Properties_ = "------"; // --- Expert Properties ---
+static input int    Magic_Number = 1119886110; // Magic number
+static input double Entry_Amount =     0.01; // Entry lots
+       input int    Stop_Loss    =     4000; // Stop Loss   (pips)
+       input int    Take_Profit  =     7000; // Take Profit (pips)
+
+static input bool OppositeReverseEnabled = true; // Opposite entry signal reverse
+
+static input string ___0______   = "------"; // --- Entry Time ---
+       input int    Ind0Param0   =        1; // From hour
+       input int    Ind0Param1   =        0; // From minute
+       input int    Ind0Param2   =       23; // Until hour
+       input int    Ind0Param3   =        0; // Until minute
+
+static input string ___1______   = "------"; // --- Envelopes ---
+       input int    Ind1Param0   =        8; // Period
+       input double Ind1Param1   =     0.10; // Deviation %
+
+static input string ___2______   = "------"; // --- DeMarker ---
+       input int    Ind2Param0   =       35; // Period
+       input double Ind2Param1   =     0.45; // Level
+
+static input string ___3______   = "------"; // --- MACD ---
+       input int    Ind3Param0   =        5; // Fast EMA
+       input int    Ind3Param1   =       19; // Slow EMA
+       input int    Ind3Param2   =        9; // MACD SMA
+
+static input string ___4______   = "------"; // --- RSI ---
+       input int    Ind4Param0   =       34; // Period
+       input int    Ind4Param1   =       45; // Level
+
+static input string ___5______   = "------"; // --- RSI ---
+       input int    Ind5Param0   =       19; // Period
+       input int    Ind5Param1   =       30; // Level
+
+static input string ___6______   = "------"; // --- Average True Range ---
+       input int    Ind6Param0   =       12; // Period
+       input double Ind6Param1   =   0.0015; // Level
+
+static input string ___Grid_____        = "------"; // --- Grid (Averaging Down) ---
+static input bool   GridEnable          =    false; // Enable Grid (Averaging Down)
+       input int    GridMinTimeInterval =        0; // Grid min time interval (hours)
+       input int    GridDistancePips    =      1000; // Grid distance (initial, pips)
+enum EGridDistanceSizing
+  {
+   EGridDistanceSizing_Equal,     // Equal distance (pips)
+   EGridDistanceSizing_Increment, // Increment distance (pips)
+   EGridDistanceSizing_Scale,     // Scale distance (coefficient)
+   EGridDistanceSizing_Fibonacci, // Fibonacci (sum of previous two)
+  };
+static input EGridDistanceSizing GridDistanceSizing = EGridDistanceSizing_Scale; // Grid distance sizing
+       input int    GridDistanceIncrement =   1000; // Grid increment distance (pips)
+       input double GridDistanceScale     =  1.1; // Grid scale distance (coefficient)
+       input int    GridMaxDistance       =  4000; // Grid maximum distance (pips)
+enum EGridVolumeSizing
+  {
+   EGridVolumeSizing_Equal,     // Equal volume (equal to the initial entry)
+   EGridVolumeSizing_Increment, // Increment volume (lots)
+   EGridVolumeSizing_Scale,     // Scale volume (coefficient)
+   EGridVolumeSizing_Fibonacci, // Fibonacci (sum of previous two)
+  };
+static input EGridVolumeSizing GridVolumeSizing = EGridVolumeSizing_Scale; // Grid volume sizing
+       input double GridVolumeIncrement    =  0.01; // Grid increment volume (lots)
+       input double GridVolumeScale        =   1.1; // Grid scale volume (coefficient)
+       input int    GridMaxPositions       =    10; // Grid maximum total positions
+static input bool   GridPairClosing        =  true; // Grid pair position closing
+       input int    GridTakeProfitCurrency =    5; // Grid Take Profit (currency)
+       input int    GridStopLossCurrency   =     0; // Grid Stop Loss (currency)
+
+static input string Entry_prot__ = "------"; // --- Entry Protections ---
+static input int    Max_Spread   =        0; // Max spread (points)
+static input int    Max_OpenPos  =        0; // Max open positions (all experts)
+static input double Max_OpenLots =     0.00; // Max open lots (all experts)
+
+static input string Daily_prot__ = "------"; // --- Daily Protections ---
+static input int    MaxDailyLoss =        0; // Maximum daily loss (currency)
+static input double Max_Daily_DD =     0.00; // Maximum daily drawdown %
+static input int    Daily_Reset  =        0; // Daily reset hour (terminal time)
+
+static input string Account_prot = "------"; // --- Account Protections ---
+static input int    Min_Equity   =        0; // Minimum equity (currency)
+static input double MaxEquity_DD =     0.00; // Maximum equity drawdown %
+static input int    Max_Equity   =        0; // Maximum equity (currency)
+
+static input string _NewsFilter_ = "------"; // --- News Filter ---
+enum NewsFilterPriority
+  {
+   NewsFilter_Disabled,     // News filter disabled
+   NewsFilter_HighOnly,     // High news filter
+   NewsFilter_HighAndMedium // Medium and High news filter
+  };
+static input NewsFilterPriority News_Priority = NewsFilter_Disabled;       // News priority
+static input string News_Currencies   = "USD,EUR"; // News currencies
+static input int    News_BeforeMedium =  2; // Before Medium news (minutes)
+static input int    News_AfterMedium  =  2; // After Medium news (minutes)
+static input int    News_BeforeHigh   =  2; // Before High news (minutes)
+static input int    News_AfterHigh    =  5; // After High news (minutes)
+static input int    News_ViewCount    = 10; // News records to show
+
+static input string _Settings___ = "------"; // --- Settings ---
+static input bool   Show_inds    =    false; // Show indicators
+
+static input string __Stats_____ = "------"; // --- Stats ---
+static input bool   Pos_Stat     =     true; // Position stats
+static input bool   Robot_Stats  =     true; // Trading stats
+
+// The delay "wait" and "max" are in milliseconds
+#define TRADE_RETRY_WAIT         100
+#define TRADE_RETRY_WAIT_MAX    5000
+#define TRADE_CONTEXT_WAIT_MAX 30000
+#define OP_FLAT  -1
+#define OP_BUY  ORDER_TYPE_BUY
+#define OP_SELL ORDER_TYPE_SELL
+
+string robotTagline  = "Visita AutomaticoTrading.com";
+
+// Session time is set in seconds from 00:00
+const int  sessionSundayOpen          =     0; // 00:00
+const int  sessionSundayClose         = 86400; // 24:00
+const int  sessionMondayThursdayOpen  =     0; // 00:00
+const int  sessionMondayThursdayClose = 86400; // 24:00
+const int  sessionFridayOpen          =     0; // 00:00
+const int  sessionFridayClose         = 86400; // 24:00
+const bool sessionIgnoreSunday        = false;
+const bool sessionCloseAtSessionClose = false;
+const bool sessionCloseAtFridayClose  = false;
+
+const double sigma = 0.000001;
+
+struct Position
+  {
+   int      type;
+   ulong    ticket;
+   int      magicNumber;
+   double   lots;
+   datetime timeOpen;
+   double   priceOpen;
+   double   priceCurrent;
+   double   stopLoss;
+   double   takeProfit;
+   double   floatingProfit;
+  };
+
+Position positions[];
+int positionsCount = 0;
+
+double gridEntryPrice = 0;
+
+datetime lastStatsUpdate = 0;
+datetime barTime;
+double   pip;
+double   stopLevel;
+bool     isTrailingStop=false;
+int      indHandlers[1][12][2];
+
+int    maxRectangles = 0;
+int    maxLabels     = 0;
+int    posStatCount  = 0;
+double posStatLots   = 0;
+
+string accountProtectionMessage = "";
+string statusMessage = "";
+
+struct NewsRecord
+  {
+   datetime time;
+   string   priority;
+   string   currency;
+   string   title;
+  };
+
+NewsRecord newsRecords[];
+string   newsCurrencies[];
+datetime lastNewsUpdate = 0;
+
+string   fillingTypeGlobalVarName        = "orderFillingType";
+string   accMaxEquityGlobalVarName       = "accMaxEquity123456789";
+string   accMaxDailyBalanceGlobalVarName = "accMaxDailyBalance123456789";
+string   accMaxDailyEquityGlobalVarName  = "accMaxDailyEquity123456789";
+string   accEntrySuspendGlobalVarName    = "accEntrySuspend123456789";
+double   equityDrawdownPercent           = 0;
+datetime dailyDrawdownLastReset          = 0;
+double   dailyLoss                       = 0;
+double   dailyDrawdown                   = 0;
+
+ENUM_ORDER_TYPE_FILLING orderFillingType = ORDER_FILLING_IOC;
+
+datetime temp_buffer_datetime[];
+double   temp_buffer_double  [];
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+
+int OnInit(void)
+  {
+   Comment("");
+    licenseValid = CheckLicense();
+
+   if(!licenseValid)
+     {
+      Alert("⛔ Licenza scaduta. Rinnova ora su WhatsApp: " + RenewalWhatsApp);
+      Comment("⛔ LICENZA SCADUTA\nRinnova subito qui: ", RenewalWhatsApp);
+      CreateRenewalButton();
+      return(INIT_SUCCEEDED);   // <-- resta attivo, NON esce più
+     }
+
+   DeleteObjects();
+   if(!CheckInputs())
+      return INIT_FAILED;
+   // ... resto invariato ...
+   
+   
+   DeleteObjects();
+
+   if(!CheckInputs())
+      return INIT_FAILED;
+
+   fillingTypeGlobalVarName = GetOrderFillingTypeGlobalVarName();
+   if(GlobalVariableCheck(fillingTypeGlobalVarName)) {
+      orderFillingType = (ENUM_ORDER_TYPE_FILLING) GlobalVariableGet(fillingTypeGlobalVarName);
+   } else {
+      GlobalVariableSet(fillingTypeGlobalVarName, orderFillingType);
+   }
+
+   ArrayResize(temp_buffer_datetime, 1);
+   ArrayResize(temp_buffer_double,   1);
+
+   barTime         = Time(0);
+   stopLevel       = (int) SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   pip             = GetPipValue();
+   isTrailingStop  = isTrailingStop && Stop_Loss > 0;
+   lastStatsUpdate = 0;
+
+   accountProtectionMessage = "";
+   statusMessage = "";
+
+   positionsCount = 0;
+   ArrayResize(positions, 0);
+   InitGlobalVariables();
+   InitIndicators();
+   UpdatePositions();
+
+   gridEntryPrice = 0;
+   if(GridEnable)
+      UpdateGridEntryPrice();
+
+   if(News_Priority != NewsFilter_Disabled && !MQLInfoInteger(MQL_TESTER))
+     {
+      ParseNewsCurrenciesText();
+      LoadNews();
+     }
+
+   OnTick();
+   ChartRedraw(0);
+
+   return INIT_SUCCEEDED;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+  {
+   if(Show_inds)
+      RemoveIndicators();
+
+   DeleteObjects();
+
+   if(accountProtectionMessage != "")
+      Comment(accountProtectionMessage);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void OnTick(void)
+  {
+   UpdatePositions();
+   UpdateGridEntryPrice();
+if(!licenseValid) return;   // <-- blocca tutte le operazioni se licenza non valida
+
+   UpdatePositions();
+   // ... resto invariato ...
+   if(!MQLInfoInteger(MQL_TESTER))
+     {
+      UpdateAccountProtection();
+      CheckAccountProtection();
+
+      const datetime time = TimeCurrent();
+      if(time > lastStatsUpdate + 3)
+        {
+         lastStatsUpdate = time;
+         if(Max_OpenPos > sigma || Max_OpenLots > sigma)
+            SetPosStats();
+
+         UpdateStats();
+        }
+
+      if(News_Priority != NewsFilter_Disabled && time > lastNewsUpdate + 1 * 60 * 60)
+         LoadNews();
+     }
+
+   if(GridEnable)
+     {
+      if(positionsCount > 0)
+         ManageGridCurrencyExit();
+      if(positionsCount > 0 && (GridMaxPositions == 0 || positionsCount < GridMaxPositions))
+         ManageGridEntry();
+     }
+
+   const datetime time = Time(0);
+   if(time > barTime)
+     {
+      barTime = time;
+      OnBar();
+     }
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void OnBar(void)
+  {
+   if(positionsCount > 0 && IsForceSessionClose())
+     {
+      ClosePositions();
+      EnsurePositionCloseUpdate();
+      return;
+     }
+
+   if(IsOutOfSession())
+      return;
+
+   if(positionsCount > 0)
+      ManageClose();
+
+   if(isTrailingStop && positionsCount == 1)
+      ManageTrailingStop();
+
+   const int entrySignal = GetEntrySignal();
+
+   if(OppositeReverseEnabled && entrySignal != OP_FLAT && positionsCount > 0)
+      ManageOppositeEntrySignal(entrySignal);
+
+   if(positionsCount == 0 && entrySignal != OP_FLAT)
+     {
+      const double entryLots       = NormalizeLots(Entry_Amount);
+      const double stopLossPrice   = GetStopLossPrice(entrySignal);
+      const double takeProfitPrice = GetTakeProfitPrice(entrySignal);
+      OpenPosition(entrySignal, entryLots, stopLossPrice, takeProfitPrice);
+      UpdatePositions();
+     }
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool CheckInputs(void)
+  {
+   string errorMessage = "";
+   if(GridEnable)
+     {
+      if(AccountInfoInteger(ACCOUNT_MARGIN_MODE) != ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
+         StringAdd(errorMessage, "ERROR: \"Enable Grid (Averaging Down)\" requires a Hedging Account\n");
+      if(GridPairClosing)
+        {
+          if(AccountInfoInteger(ACCOUNT_FIFO_CLOSE))
+             StringAdd(errorMessage, "ERROR: \"Grid pair position closing\" cannot work on a FIFO account\n");
+          if(GridTakeProfitCurrency < 0.01)
+             StringAdd(errorMessage, "ERROR: \"Grid pair position closing\" requires \"Grid Take Profit (currency)\"\n");
+        }
+     }
+
+   if(errorMessage != "")
+     {
+      Comment(errorMessage);
+      Print(errorMessage);
+      return false;
+     }
+
+   return true;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void UpdatePositions(void)
+  {
+   int index = 0;
+
+   for(int posIndex = 0, len = PositionsTotal(); posIndex < len; posIndex++)
+     {
+      const ulong posTicket = PositionGetTicket(posIndex);
+
+      if(PositionSelectByTicket(posTicket) &&
+         PositionGetString(POSITION_SYMBOL) == _Symbol &&
+         PositionGetInteger(POSITION_MAGIC) == Magic_Number)
+        {
+         if(ArraySize(positions) <= index)
+            ArrayResize(positions, MathMax(ArraySize(positions) * 2, 1));
+
+         positions[index].type           = (int) PositionGetInteger(POSITION_TYPE);
+         positions[index].ticket         = posTicket;
+         positions[index].magicNumber    = Magic_Number;
+         positions[index].lots           = NormalizeLots(PositionGetDouble(POSITION_VOLUME));
+         positions[index].timeOpen       = (datetime) PositionGetInteger(POSITION_TIME);
+         positions[index].priceOpen      = NormalizeDouble(PositionGetDouble(POSITION_PRICE_OPEN),    _Digits);
+         positions[index].priceCurrent   = NormalizeDouble(PositionGetDouble(POSITION_PRICE_CURRENT), _Digits);
+         positions[index].stopLoss       = NormalizeDouble(PositionGetDouble(POSITION_SL), _Digits);
+         positions[index].takeProfit     = NormalizeDouble(PositionGetDouble(POSITION_TP), _Digits);
+         positions[index].floatingProfit = NormalizeDouble(PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP), 2);
+         index++;
+        }
+     }
+
+   positionsCount = index;
+   if(ArraySize(positions) != positionsCount)
+      ArrayResize(positions, positionsCount);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void UpdateGridEntryPrice(void)
+  {
+   gridEntryPrice = 0;
+
+   if(!GridEnable || positionsCount == 0)
+      return;
+
+   double gridDistanceDelta         = PipsToPoints(GridDistancePips);
+   double gridDistanceStep          = gridDistanceDelta;
+   double gridDistanceFibonacciPrev = gridDistanceStep;
+   double gridDistanceFibonacciCurr = gridDistanceStep + gridDistanceStep;
+
+   for(int i = 1; i < positionsCount; i += 1)
+     {
+      double delta = gridDistanceStep;
+      switch(GridDistanceSizing)
+        {
+         case EGridDistanceSizing_Equal:
+            break;
+         case EGridDistanceSizing_Increment:
+            delta += PipsToPoints(GridDistanceIncrement);
+            break;
+         case EGridDistanceSizing_Scale:
+            delta *= GridDistanceScale;
+            break;
+         case EGridDistanceSizing_Fibonacci:
+           {
+            delta = gridDistanceFibonacciCurr;
+            gridDistanceFibonacciCurr += gridDistanceFibonacciPrev;
+            gridDistanceFibonacciPrev  = delta;
+            break;
+           }
+         default:
+            break;
+        }
+
+      if(GridMaxDistance > 0)
+         delta = MathMin(delta, PipsToPoints(GridMaxDistance));
+      gridDistanceStep   = delta;
+      gridDistanceDelta += delta;
+     }
+
+   const double sign = positions[0].type == OP_BUY ? -1 : 1;
+   gridEntryPrice = NormalizeDouble(positions[0].priceOpen + sign * gridDistanceDelta * _Point, _Digits);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void ManageGridEntry(void)
+  {
+   if(positionsCount == 0)
+      return;
+
+   if(GridMinTimeInterval > 0)
+     {
+      const datetime symbolTime = SymbolTime();
+      const datetime entryTime  = positions[positionsCount - 1].timeOpen;
+      if(symbolTime < entryTime + 3600 * GridMinTimeInterval)
+         return;
+     }
+
+   const int entryDir  = positions[0].type;
+   if((entryDir == OP_BUY  && Ask() <= gridEntryPrice) ||
+      (entryDir == OP_SELL && Bid() >= gridEntryPrice))
+     {
+      const double entryVolume     = GetGridEntryVolume();
+      const double stopLossPrice   = positions[0].stopLoss;
+      const double takeProfitPrice = positions[0].takeProfit;
+
+      if(OpenPosition(entryDir, entryVolume, stopLossPrice, takeProfitPrice))
+        {
+         EnsurePositionCountUpdated(positionsCount + 1);
+         UpdateGridEntryPrice();
+        }
+     }
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+double GetGridEntryVolume(void)
+  {
+   double entryVolume    = Entry_Amount;
+   double entryFibonacci = entryVolume;
+
+   for(int i = 0; i < positionsCount; i += 1)
+     {
+      switch(GridVolumeSizing)
+        {
+         case EGridVolumeSizing_Equal:
+            break;
+         case EGridVolumeSizing_Increment:
+            entryVolume += GridVolumeIncrement;
+            break;
+         case EGridVolumeSizing_Scale:
+            entryVolume *= GridVolumeScale;
+            break;
+         case EGridVolumeSizing_Fibonacci:
+           {
+            const double temp = entryFibonacci;
+            entryFibonacci = entryVolume;
+            entryVolume += temp;
+            break;
+           }
+         default:
+            break;
+        }
+     }
+
+   return NormalizeLots(entryVolume);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void ManageGridCurrencyExit(void)
+  {
+   if(positionsCount == 0)
+      return;
+
+   double totalProfit = 0;
+   for(int i = 0; i < positionsCount; i++)
+      totalProfit += positions[i].floatingProfit;
+
+   if(GridStopLossCurrency > 0.001 && totalProfit <= -GridStopLossCurrency)
+     {
+      ClosePositions();
+      EnsurePositionCloseUpdate();
+      UpdateGridEntryPrice();
+      return;
+     }
+
+   if(GridTakeProfitCurrency < 0.01)
+      return;
+
+   if(totalProfit >= GridTakeProfitCurrency)
+     {
+      ClosePositions();
+      EnsurePositionCloseUpdate();
+      UpdateGridEntryPrice();
+      return;
+     }
+
+   if(!GridPairClosing || positionsCount < 2 || positions[positionsCount - 1].floatingProfit <= 0)
+      return;
+
+   double sumProfit = positions[0].floatingProfit;
+   for(int i = positionsCount - 1; i > 0; i--)
+     {
+      sumProfit += positions[i].floatingProfit;
+      if(sumProfit >= GridTakeProfitCurrency)
+        {
+         for(int j = positionsCount - 1; j >= i; j--)
+            ClosePosition(positions[j]);
+         ClosePosition(positions[0]);
+         EnsurePositionCountUpdated(i - 1);
+         UpdateGridEntryPrice();
+         return;
+        }
+     }
+
+   const double volumeStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   const double countSteps = MathMax(1.0, MathRound(positions[0].lots / volumeStep));
+
+   sumProfit = NormalizeDouble(positions[0].floatingProfit / countSteps, 2);
+   for(int i = positionsCount - 1; i > 0; i--)
+     {
+      sumProfit += positions[i].floatingProfit;
+      if(sumProfit >= GridTakeProfitCurrency)
+        {
+         for(int j = positionsCount - 1; j >= i; j--)
+            ClosePosition(positions[j]);
+         const double minVolume = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+         const bool isFirstWillCloseFully = positions[0].lots <= minVolume + sigma;
+         ClosePositionPartial(positions[0], minVolume);
+         EnsurePositionCountUpdated(isFirstWillCloseFully ? i - 1 : i);
+         UpdateGridEntryPrice();
+         return;
+        }
+     }
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void InitIndicators(void)
+  {
+   // Entry Time (1, 0, 23, 0)
+   indHandlers[0][0][0] = -1;
+   if(Show_inds) ChartIndicatorAdd(0, 0, indHandlers[0][0][0]);
+   // Envelopes (Close, Simple, 8, 0.10)
+   indHandlers[0][1][0] = iEnvelopes(NULL, 0, Ind1Param0, 0, MODE_SMA, PRICE_CLOSE, Ind1Param1);
+   if(Show_inds) ChartIndicatorAdd(0, 0, indHandlers[0][1][0]);
+   // DeMarker (35), Level: 0.45
+   indHandlers[0][2][0] = iDeMarker(NULL, 0, Ind2Param0);
+   if(Show_inds) ChartIndicatorAdd(0, 1, indHandlers[0][2][0]);
+   // MACD (Close, 5, 19, 9)
+   indHandlers[0][3][0] = iMACD(NULL, 0, Ind3Param0, Ind3Param1, Ind3Param2, PRICE_CLOSE);
+   if(Show_inds) ChartIndicatorAdd(0, 2, indHandlers[0][3][0]);
+   // RSI (Close, 34), Level: 45
+   indHandlers[0][4][0] = iRSI(NULL, 0, Ind4Param0, PRICE_CLOSE);
+   if(Show_inds) ChartIndicatorAdd(0, 3, indHandlers[0][4][0]);
+   // RSI (Close, 19)
+   indHandlers[0][5][0] = iRSI(NULL, 0, Ind5Param0, PRICE_CLOSE);
+   if(Show_inds) ChartIndicatorAdd(0, 4, indHandlers[0][5][0]);
+   // Average True Range (12), Level: 0.0015
+   indHandlers[0][6][0] = iATR(NULL, 0, Ind6Param0);
+   if(Show_inds) ChartIndicatorAdd(0, 5, indHandlers[0][6][0]);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void RemoveIndicators(void)
+  {
+   long windowsCount = -1;
+   ChartGetInteger(0, CHART_WINDOWS_TOTAL, 0, windowsCount);
+
+   for(int window = (int) windowsCount - 1; window >= 0; window--)
+     {
+      const int indicatorsCount = ChartIndicatorsTotal(0, window);
+      for(int i = indicatorsCount - 1; i >= 0; i--)
+        {
+         const string name = ChartIndicatorName(0, window, i);
+         ChartIndicatorDelete(0, window, name);
+        }
+     }
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+int GetEntrySignal(void)
+  {
+   // Entry Time (1, 0, 23, 0)
+
+   int fromTime0  = Ind0Param0 * 3600 + Ind0Param1 * 60;
+   int untilTime0 = Ind0Param2 * 3600 + Ind0Param3 * 60;
+
+   MqlDateTime mqlTime0;
+   TimeToStruct(Time(0), mqlTime0);
+   int barMinutes0 = mqlTime0.hour * 3600 + mqlTime0.min * 60;
+
+   bool isOnTime0 = fromTime0 < untilTime0
+      ? barMinutes0 >= fromTime0 && barMinutes0 <= untilTime0
+      : barMinutes0 >= fromTime0 || barMinutes0 <= untilTime0;
+
+   bool ind0long  = isOnTime0;
+   bool ind0short = isOnTime0;
+
+
+   // Envelopes (Close, Simple, 8, 0.10)
+   double ind1buffer0[]; CopyBuffer(indHandlers[0][1][0], 0, 1, 2, ind1buffer0);
+   double ind1buffer1[]; CopyBuffer(indHandlers[0][1][0], 1, 1, 2, ind1buffer1);
+   double ind1upBand1 = ind1buffer0[1];
+   double ind1dnBand1 = ind1buffer1[1];
+   double ind1upBand2 = ind1buffer0[0];
+   double ind1dnBand2 = ind1buffer1[0];
+   bool   ind1long    = Open(0) > ind1dnBand1 + sigma && Open(1) < ind1dnBand2 - sigma;
+   bool   ind1short   = Open(0) < ind1upBand1 - sigma && Open(1) > ind1upBand2 + sigma;
+
+   // DeMarker (35), Level: 0.45
+   double ind2buffer[]; CopyBuffer(indHandlers[0][2][0], 0, 1, 3, ind2buffer);
+   double ind2val1  = ind2buffer[2];
+   bool   ind2long  = ind2val1 > Ind2Param1 + sigma;
+   bool   ind2short = ind2val1 < 1 - Ind2Param1 - sigma;
+
+   // MACD (Close, 5, 19, 9)
+   double ind3buffer[]; CopyBuffer(indHandlers[0][3][0], 0, 1, 3, ind3buffer);
+   double ind3val1  = ind3buffer[2];
+   double ind3val2  = ind3buffer[1];
+   bool   ind3long  = ind3val1 > ind3val2 + sigma;
+   bool   ind3short = ind3val1 < ind3val2 - sigma;
+
+   // RSI (Close, 34), Level: 45
+   double ind4buffer[]; CopyBuffer(indHandlers[0][4][0], 0, 1, 3, ind4buffer);
+   double ind4val1  = ind4buffer[2];
+   bool   ind4long  = ind4val1 > Ind4Param1 + sigma;
+   bool   ind4short = ind4val1 < 100 - Ind4Param1 - sigma;
+
+   // RSI (Close, 19)
+   double ind5buffer[]; CopyBuffer(indHandlers[0][5][0], 0, 1, 3, ind5buffer);
+   double ind5val1  = ind5buffer[2];
+   double ind5val2  = ind5buffer[1];
+   double ind5val3  = ind5buffer[0];
+   bool   ind5long  = ind5val1 > ind5val2 + sigma && ind5val2 < ind5val3 - sigma;
+   bool   ind5short = ind5val1 < ind5val2 - sigma && ind5val2 > ind5val3 + sigma;
+
+   bool canOpenLong  = ind0long && ind1long && ind2long && ind3long && ind4long && ind5long;
+   bool canOpenShort = ind0short && ind1short && ind2short && ind3short && ind4short && ind5short;
+
+   return canOpenLong  && !canOpenShort ? OP_BUY
+        : canOpenShort && !canOpenLong  ? OP_SELL
+                                        : OP_FLAT;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void ManageClose(void)
+  {
+   // Average True Range (12), Level: 0.0015
+   double ind6buffer[]; CopyBuffer(indHandlers[0][6][0], 0, 1, 3, ind6buffer);
+   double ind6val1  = ind6buffer[2];
+   double ind6val2  = ind6buffer[1];
+   bool   ind6long  = ind6val1 > Ind6Param1 + sigma && ind6val2 < Ind6Param1 - sigma;
+   bool   ind6short = ind6long;
+
+   if((positions[0].type == OP_BUY  && ind6long) ||
+      (positions[0].type == OP_SELL && ind6short))
+     {
+      ClosePositions();
+      EnsurePositionCloseUpdate();
+     }
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void ManageOppositeEntrySignal(int entrySignal)
+  {
+   const int posType = positions[0].type;
+   if((posType == OP_BUY  && entrySignal == OP_SELL) ||
+      (posType == OP_SELL && entrySignal == OP_BUY ))
+     {
+      ClosePositions();
+      EnsurePositionCloseUpdate();
+     }
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool OpenPosition(const int command, const double entryAmount, const double stopLossPrice, const double takeProfitPrice)
+  {
+   const int spread = (int)((Ask() - Bid()) / _Point);
+
+   statusMessage = "";
+   if(!IsTradeAllowed())
+      statusMessage += "Algo Trading is disabled\n";
+   if(Max_OpenPos > sigma && posStatCount >= Max_OpenPos)
+      statusMessage += StringFormat("Protection: Max open positions: %d, current: %d\n", Max_OpenPos, posStatCount);
+   if(Max_OpenLots > sigma && posStatLots > Max_OpenLots - sigma)
+      statusMessage += StringFormat("Protection: Max open lots: %.2f, current: %.2f\n", Max_OpenLots, posStatLots);
+   if(Max_Spread > sigma && spread > Max_Spread)
+      statusMessage += StringFormat("Protection: Max spread: %d, current: %d\n", Max_Spread, spread);
+   if(MaxDailyLoss > sigma && dailyLoss >= MaxDailyLoss)
+      statusMessage += StringFormat("Protection: Max daily loss: %d, current: %.2f\n", MaxDailyLoss, dailyLoss);
+   if(Max_Daily_DD > sigma && dailyDrawdown >= Max_Daily_DD)
+      statusMessage += StringFormat("Protection: Max daily drawdown: %.2f%%, current: %.2f%%\n", Max_Daily_DD, dailyDrawdown);
+   if(GlobalVariableGet(accEntrySuspendGlobalVarName) > sigma)
+      statusMessage += StringFormat("New entries are suspended until the Daily reset hour: %d\n", Daily_Reset);
+
+   const int newsIndex = NewsFilterActive();
+   if(newsIndex > -1)
+     {
+      const NewsRecord newsRecord = newsRecords[newsIndex];
+      statusMessage += StringFormat("News filter: %s %s %s %s\n",
+                                    newsRecord.priority == "high" ? "[high]" : "[med]",
+                                    TimeToString(newsRecord.time, TIME_DATE | TIME_MINUTES),
+                                    newsRecord.currency,
+                                    newsRecord.title);
+     }
+
+   if(statusMessage != "")
+     {
+      statusMessage = TimeToString(TimeCurrent()) + " " + "An entry order was canceled:\n" + statusMessage;
+      return false;
+     }
+
+   return ManageOrderSend(command, entryAmount, stopLossPrice, takeProfitPrice, 0);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool ManageOrderSend(const int command, const double lots, const double stopLoss, const double takeProfit, const ulong ticket)
+  {
+   int totalDelay = 0;
+   int delay      = TRADE_RETRY_WAIT;
+   int attempt    = 0;
+
+   while(totalDelay < TRADE_RETRY_WAIT_MAX)
+     {
+      attempt++;
+
+      if(IsTradeContextFree())
+        {
+         MqlTradeRequest request;
+         MqlTradeResult  result;
+         ZeroMemory(request);
+         ZeroMemory(result);
+
+         request.action       = TRADE_ACTION_DEAL;
+         request.symbol       = _Symbol;
+         request.volume       = lots;
+         request.type         = command == OP_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+         request.price        = command == OP_BUY ? Ask() : Bid();
+         request.type_filling = orderFillingType;
+         request.deviation    = 10;
+         request.sl           = stopLoss;
+         request.tp           = takeProfit;
+         request.magic        = Magic_Number;
+         request.position     = ticket;
+         request.comment      = IntegerToString(Magic_Number);
+
+         ResetLastError();
+         if(CheckOrder(request))
+           {
+            ResetLastError();
+            const bool isOrderSend = OrderSend(request, result);
+            const uint retcode     = result.retcode;
+            const int  lastError   = GetLastError();
+
+            if(isOrderSend && IsTradeSendSuccessRetcode(retcode, true))
+               return true;
+
+            PrintFormat("OrderSend failed: attempt=%d elapsed=%dms retcode=%u comment=%s error=%d",
+                        attempt, totalDelay, retcode, result.comment, lastError);
+
+            if(!IsRetryableTradeRetcode(retcode))
+               return false;
+          }
+         else
+          {
+            PrintFormat("OrderCheck failed: attempt=%d elapsed=%dms", attempt, totalDelay);
+            return false;
+          }
+        }
+      else
+        {
+         PrintFormat("Trade context is not free: attempt=%d elapsed=%dms", attempt, totalDelay);
+        }
+
+      Sleep(delay);
+      totalDelay += delay;
+      delay       = MathMin(delay * 2, TRADE_RETRY_WAIT_MAX);
+      PrintFormat("Order Send retry: nextDelay=%d elapsed=%dms", delay, totalDelay);
+     }
+
+   return false;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void ModifyPositionByTicket(ulong ticket, double stopLoss, double takeProfit)
+  {
+   if(!IsTradeAllowed())
+     {
+      statusMessage = "Algo Trading is disabled\n";
+      statusMessage = TimeToString(TimeCurrent()) + " " + "A modify order was canceled:\n" + statusMessage;
+      return;
+     }
+
+   int totalDelay = 0;
+   int delay      = TRADE_RETRY_WAIT;
+   int attempt    = 0;
+
+   while(totalDelay < TRADE_RETRY_WAIT_MAX)
+     {
+      attempt++;
+
+      if(IsTradeContextFree())
+        {
+         MqlTradeRequest request;
+         MqlTradeResult  result;
+         ZeroMemory(request);
+         ZeroMemory(result);
+
+         request.action   = TRADE_ACTION_SLTP;
+         request.symbol   = _Symbol;
+         request.sl       = stopLoss;
+         request.tp       = takeProfit;
+         request.magic    = Magic_Number;
+         request.position = ticket;
+         request.comment  = IntegerToString(Magic_Number);
+
+         ResetLastError();
+         if(CheckOrder(request))
+           {
+            ResetLastError();
+            const bool isOrderSend = OrderSend(request, result);
+            const uint retcode     = result.retcode;
+            const int  lastError   = GetLastError();
+
+            if(isOrderSend && IsTradeSendSuccessRetcode(retcode, false))
+               return;
+
+            PrintFormat("OrderModify failed: attempt=%d elapsed=%dms retcode=%u comment=%s error=%d",
+                        attempt, totalDelay, retcode, result.comment, lastError);
+
+            if(!IsRetryableTradeRetcode(retcode))
+               return;
+          }
+         else
+          {
+            PrintFormat("OrderCheck failed on modify: attempt=%d elapsed=%dms", attempt, totalDelay);
+            return;
+          }
+        }
+      else
+        {
+         PrintFormat("Trade context is not free on modify: attempt=%d elapsed=%dms", attempt, totalDelay);
+        }
+
+      Sleep(delay);
+      totalDelay += delay;
+      delay       = MathMin(delay * 2, TRADE_RETRY_WAIT_MAX);
+      PrintFormat("Order Modify retry: nextDelay=%d elapsed=%dms", delay, totalDelay);
+     }
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void ClosePosition(Position &position)
+  {
+   if(!IsTradeAllowed())
+     {
+      statusMessage = "Algo Trading is disabled\n";
+      statusMessage = TimeToString(TimeCurrent()) + " " + "A close order was canceled:\n" + statusMessage;
+      return;
+     }
+
+   const int command = position.type == OP_BUY ? OP_SELL : OP_BUY;
+   ManageOrderSend(command, position.lots, 0, 0, position.ticket);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void ClosePositions(void)
+  {
+   if(!IsTradeAllowed())
+     {
+      statusMessage = "Algo Trading is disabled\n";
+      statusMessage = TimeToString(TimeCurrent()) + " " + "A close order was canceled:\n" + statusMessage;
+      return;
+     }
+
+   for(int i = positionsCount - 1; i >= 0; i--)
+      ClosePosition(positions[i]);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void ClosePositionPartial(Position &position, const double lotsToClose)
+  {
+   if(!IsTradeAllowed())
+     {
+      statusMessage = "Algo Trading is disabled\n";
+      statusMessage = TimeToString(TimeCurrent()) + " " + "A close order was canceled:\n" + statusMessage;
+      return;
+     }
+
+   const int command = position.type == OP_BUY ? OP_SELL : OP_BUY;
+   ManageOrderSend(command, lotsToClose, 0, 0, position.ticket);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool CheckOrder(MqlTradeRequest &request)
+  {
+   const int maxFillAttempts = 4; // IOC, FOK, RETURN, BOC
+
+   for(int attempt = 0; attempt < maxFillAttempts; attempt++)
+     {
+      MqlTradeCheckResult check;
+      ZeroMemory(check);
+      ResetLastError();
+
+      if(request.action == TRADE_ACTION_DEAL)
+         request.type_filling = orderFillingType;
+
+      if(OrderCheck(request, check))
+         return true;
+
+      if(check.retcode != TRADE_RETCODE_INVALID_FILL)
+        {
+         Print("Error with OrderCheck: " + check.comment);
+         return false;
+        }
+
+      switch(orderFillingType)
+        {
+         case ORDER_FILLING_IOC:
+            orderFillingType = ORDER_FILLING_FOK;
+            break;
+         case ORDER_FILLING_FOK:
+            orderFillingType = ORDER_FILLING_RETURN;
+            break;
+         case ORDER_FILLING_RETURN:
+            orderFillingType = ORDER_FILLING_BOC;
+            break;
+         case ORDER_FILLING_BOC:
+            orderFillingType = ORDER_FILLING_IOC;
+            break;
+        }
+
+      GlobalVariableSet(fillingTypeGlobalVarName, orderFillingType);
+     }
+
+   Print("Error with OrderCheck: unsupported filling mode after trying all available options.");
+   return false;
+  }
+//+------------------------------------------------------------------+
+//| Wait for MT update https://forexsb.com/forum/post/73434/#p73434  |
+//+------------------------------------------------------------------+
+void EnsurePositionCountUpdated(int expectedCount)
+  {
+   if(!IsTradeAllowed())
+     {
+      UpdatePositions();
+      return;
+     }
+
+   const int maxDelay = 5000;
+   int totalDelay = 0;
+   int delay      = 100;
+   while(totalDelay < maxDelay)
+     {
+      UpdatePositions();
+      if(positionsCount == expectedCount)
+         break;
+      Sleep(delay);
+      totalDelay += delay;
+      delay      += 50;
+     }
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void EnsurePositionCloseUpdate(void)
+  {
+   EnsurePositionCountUpdated(0);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+double GetStopLossPrice(const int command)
+  {
+   if(Stop_Loss == 0)
+      return 0;
+
+   const double delta    = MathMax(pip * Stop_Loss, _Point * stopLevel);
+   const double stopLoss = command == OP_BUY ? Bid() - delta : Ask() + delta;
+
+   return NormalizeDouble(stopLoss, _Digits);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+double GetTakeProfitPrice(const int command)
+  {
+   if(Take_Profit == 0)
+      return 0;
+
+   const double delta      = MathMax(pip * Take_Profit, _Point * stopLevel);
+   const double takeProfit = command == OP_BUY ? Bid() + delta : Ask() - delta;
+
+   return NormalizeDouble(takeProfit, _Digits);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void ManageTrailingStop(void)
+  {
+   for(int i = positionsCount - 1; i >= 0; i--)
+     {
+      const Position position = positions[i];
+      const double trailingStop = GetTrailingStopPrice(position);
+      if((position.type == OP_BUY  && MathAbs(trailingStop - Bid()) < _Point) ||
+         (position.type == OP_SELL && MathAbs(trailingStop - Ask()) < _Point))
+        {
+         ClosePosition(positions[i]);
+         continue;
+        }
+
+      if(MathAbs(trailingStop - position.stopLoss) > _Point)
+         ModifyPositionByTicket(position.ticket, trailingStop, position.takeProfit);
+     }
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+double GetTrailingStopPrice(const Position &position)
+  {
+   const double bid = Bid();
+   const double ask = Ask();
+   const double stopLevelPoints = _Point * stopLevel;
+   const double stopLossPoints  = pip * Stop_Loss;
+
+   double stopLoss = position.stopLoss;
+
+   if(position.type == OP_BUY)
+     {
+      const double newStopLoss = High(1) - stopLossPoints;
+      if(position.stopLoss <= newStopLoss - pip)
+         stopLoss = newStopLoss < bid ? newStopLoss >= bid - stopLevelPoints
+                                          ? bid - stopLevelPoints
+                                          : newStopLoss
+                                          : bid;
+     }
+   else if(position.type == OP_SELL)
+     {
+      const double spread      = ask - bid;
+      const double newStopLoss = Low(1) + spread + stopLossPoints;
+      if(position.stopLoss >= newStopLoss + pip)
+         stopLoss = newStopLoss > ask ? newStopLoss <= ask + stopLevelPoints
+                                          ? ask + stopLevelPoints
+                                          : newStopLoss
+                                          : ask;
+     }
+
+   return NormalizeDouble(stopLoss, _Digits);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+datetime SymbolTime(void)
+  {
+   return (datetime) SymbolInfoInteger(_Symbol, SYMBOL_TIME);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+double Bid(void)
+  {
+   return SymbolInfoDouble(_Symbol, SYMBOL_BID);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+double Ask(void)
+  {
+   return SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+datetime Time(const int bar)
+  {
+   return CopyTime(_Symbol, _Period, bar, 1, temp_buffer_datetime) == 1 ? temp_buffer_datetime[0] : 0;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+double Open(const int bar)
+  {
+   return CopyOpen(_Symbol, _Period, bar, 1, temp_buffer_double) == 1 ? temp_buffer_double[0] : 0;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+double High(const int bar)
+  {
+   return CopyHigh(_Symbol, _Period, bar, 1, temp_buffer_double) == 1 ? temp_buffer_double[0] : 0;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+double Low(const int bar)
+  {
+   return CopyLow(_Symbol, _Period, bar, 1, temp_buffer_double) == 1 ? temp_buffer_double[0] : 0;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+double Close(const int bar)
+  {
+   return CopyClose(_Symbol, _Period, bar, 1, temp_buffer_double) == 1 ? temp_buffer_double[0] : 0;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+double NormalizeLots(double lots)
+  {
+   const double minVolume  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   const double maxVolume  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   const double volumeStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+
+   if(lots < minVolume)
+      lots = minVolume;
+   if(lots > maxVolume)
+      lots = maxVolume;
+
+   int digits = 2;
+   if(volumeStep > 1.0 - 1e-6)
+      digits = 0;
+   else if(volumeStep > 0.1 - 1e-6)
+      digits = 1;
+   else if(volumeStep > 0.01 - 1e-6)
+      digits = 2;
+   else
+      digits = 3;
+
+   lots = NormalizeDouble(lots, digits);
+   lots = MathRound(lots / volumeStep) * volumeStep;
+   lots = NormalizeDouble(lots, digits);
+
+   if(lots < minVolume)
+      lots = minVolume;
+   if(lots > maxVolume)
+      lots = maxVolume;
+
+   return lots;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+double GetPipValue(void)
+  {
+   return _Digits == 4 || _Digits == 5 ? 0.0001
+        : _Digits == 2 || _Digits == 3 ? 0.01
+                        : _Digits == 1 ? 0.1
+                                       : 1;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+string GetOrderFillingTypeGlobalVarName(void)
+  {
+   string fixedSymbol = "";
+   const int symbolLen = StringLen(_Symbol);
+
+   for(int i = 0; i < symbolLen; i++)
+     {
+      const ushort ch = StringGetCharacter(_Symbol, i);
+      const bool isDigit = ch >= '0' && ch <= '9';
+      const bool isUpper = ch >= 'A' && ch <= 'Z';
+      const bool isLower = ch >= 'a' && ch <= 'z';
+
+      if(isDigit || isUpper || isLower || ch == '_')
+         fixedSymbol += CharToString((uchar) ch);
+      else
+         fixedSymbol += StringFormat("_%d_", ch);
+     }
+
+   if(fixedSymbol == "")
+      fixedSymbol = "symbol";
+
+   return "orderFillingType_" + fixedSymbol;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+double PipsToPoints(const int pips)
+  {
+   return _Digits == 5 || _Digits == 3 ? pips * 10 : pips;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+int DayOfWeek(void)
+  {
+   MqlDateTime mqlTime;
+   TimeToStruct(Time(0), mqlTime);
+   return mqlTime.day_of_week;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool IsTradeSendSuccessRetcode(const uint retcode, const bool isDeal)
+  {
+   if(retcode == TRADE_RETCODE_DONE)
+      return true;
+
+   if(isDeal && retcode == TRADE_RETCODE_DONE_PARTIAL)
+      return true;
+
+   if(!isDeal && retcode == TRADE_RETCODE_NO_CHANGES)
+      return true;
+
+   return false;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool IsRetryableTradeRetcode(const uint retcode)
+  {
+   switch(retcode)
+     {
+      case TRADE_RETCODE_REQUOTE:
+      case TRADE_RETCODE_PRICE_CHANGED:
+      case TRADE_RETCODE_PRICE_OFF:
+      case TRADE_RETCODE_TIMEOUT:
+      case TRADE_RETCODE_CONNECTION:
+      case TRADE_RETCODE_TOO_MANY_REQUESTS:
+      case TRADE_RETCODE_LOCKED:
+      case TRADE_RETCODE_ORDER_CHANGED:
+      case TRADE_RETCODE_FROZEN:
+         return true;
+     }
+
+   return false;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool IsTradeContextFree(void)
+  {
+   if(IsTradeAllowed())
+      return true;
+
+   const uint startWait = GetTickCount();
+   Print("Trade preconditions are not met. Waiting...");
+
+   while(true)
+     {
+      if(IsStopped())
+         return false;
+
+      const uint totalWait = GetTickCount() - startWait;
+      if(totalWait > TRADE_CONTEXT_WAIT_MAX)
+        {
+         Print("The waiting limit exceeded!");
+         return false;
+        }
+
+      if(IsTradeAllowed())
+         return true;
+
+      Sleep(TRADE_RETRY_WAIT);
+     }
+
+   return true;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool IsTradeAllowed(void)
+  {
+   return (bool) MQLInfoInteger(MQL_TRADE_ALLOWED)           &&
+          (bool) TerminalInfoInteger(TERMINAL_CONNECTED)     &&
+          (bool) TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) &&
+          (bool) AccountInfoInteger(ACCOUNT_TRADE_ALLOWED)   &&
+          (bool) AccountInfoInteger(ACCOUNT_TRADE_EXPERT);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool IsOutOfSession(void)
+  {
+   const int dayOfWeek    = DayOfWeek();
+   const int periodStart  = int(Time(0) % 86400);
+   const int periodLength = PeriodSeconds(_Period);
+   const int periodFix    = periodStart + (sessionCloseAtSessionClose ? periodLength : 0);
+   const int friBarFix    = periodStart + (sessionCloseAtFridayClose ||
+                                           sessionCloseAtSessionClose ? periodLength : 0);
+
+   return dayOfWeek == 0 && sessionIgnoreSunday ? true
+        : dayOfWeek == 0 ? periodStart < sessionSundayOpen ||
+                           periodFix   > sessionSundayClose
+        : dayOfWeek  < 5 ? periodStart < sessionMondayThursdayOpen ||
+                           periodFix   > sessionMondayThursdayClose
+                         : periodStart < sessionFridayOpen ||
+                           friBarFix   > sessionFridayClose;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool IsForceSessionClose(void)
+  {
+   if(!sessionCloseAtFridayClose && !sessionCloseAtSessionClose)
+      return false;
+
+   const int dayOfWeek = DayOfWeek();
+   const int periodEnd = int(Time(0) % 86400) + PeriodSeconds(_Period);
+
+   return dayOfWeek == 0 && sessionCloseAtSessionClose ? periodEnd > sessionSundayClose
+        : dayOfWeek  < 5 && sessionCloseAtSessionClose ? periodEnd > sessionMondayThursdayClose
+                                      : dayOfWeek == 5 ? periodEnd > sessionFridayClose
+                                                       : false;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void UpdateAccountProtection(void)
+  {
+   const double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+
+   double maxEquity = GlobalVariableGet(accMaxEquityGlobalVarName);
+   if(equity > maxEquity)
+     {
+      maxEquity = equity;
+      GlobalVariableSet(accMaxEquityGlobalVarName, maxEquity);
+     }
+
+   equityDrawdownPercent = maxEquity > equity && maxEquity > 1 ? 100 * (maxEquity - equity) / maxEquity : 0;
+
+   if(equity > GlobalVariableGet(accMaxDailyEquityGlobalVarName))
+      GlobalVariableSet(accMaxDailyEquityGlobalVarName, equity);
+
+   const double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   if(balance > GlobalVariableGet(accMaxDailyBalanceGlobalVarName))
+      GlobalVariableSet(accMaxDailyBalanceGlobalVarName, balance);
+
+   double maxDailyBalance = GlobalVariableGet(accMaxDailyBalanceGlobalVarName);
+   double maxDailyEquity  = GlobalVariableGet(accMaxDailyEquityGlobalVarName);
+
+   const datetime currentTime = TimeCurrent();
+   MqlDateTime dateTime;
+   TimeToStruct(currentTime, dateTime);
+   if(dateTime.hour == Daily_Reset && currentTime - dailyDrawdownLastReset > 60 * 60)
+     {
+      dailyDrawdownLastReset = currentTime;
+      GlobalVariableSet(accMaxDailyEquityGlobalVarName,  equity);
+      GlobalVariableSet(accMaxDailyBalanceGlobalVarName, balance);
+      GlobalVariableSet(accEntrySuspendGlobalVarName,    0);
+      maxDailyBalance = balance;
+      maxDailyEquity  = equity;
+      statusMessage   = "";
+     }
+
+   dailyLoss = equity >= maxDailyBalance ? 0 : maxDailyBalance - equity;
+   dailyDrawdown = maxDailyEquity > equity && maxDailyEquity > 1 ? 100 * (maxDailyEquity - equity) / maxDailyEquity : 0;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void CheckAccountProtection(void)
+  {
+   const double accountEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+
+   if(Min_Equity > sigma && accountEquity <= Min_Equity)
+     {
+      ActivateProtection(StringFormat("Minimum equity protection activated. Equity: %.2f", accountEquity));
+      return;
+     }
+
+   if(Max_Equity > sigma && accountEquity >= Max_Equity)
+     {
+      ActivateProtection(StringFormat("Maximum equity protection activated. Equity: %.2f", accountEquity));
+      return;
+     }
+
+   if(MaxEquity_DD > sigma && equityDrawdownPercent >= MaxEquity_DD)
+     {
+      ActivateProtection(StringFormat("Max Equity DD protection activated! Equity DD: %.2f%%", equityDrawdownPercent));
+      return;
+     }
+
+   if(MaxDailyLoss > sigma && dailyLoss >= MaxDailyLoss)
+     {
+      statusMessage = StringFormat("Max daily loss protection activated! Daily loss: %.2f\n", dailyLoss);
+      GlobalVariableSet(accEntrySuspendGlobalVarName, 1);
+      if(positionsCount > 0)
+        {
+         ClosePositions();
+         EnsurePositionCloseUpdate();
+        }
+      return;
+     }
+
+   if(Max_Daily_DD > sigma && dailyDrawdown >= Max_Daily_DD)
+     {
+      statusMessage = StringFormat("Max daily drawdown protection activated! Daily DD: %.2f%%\n", dailyDrawdown);
+      GlobalVariableSet(accEntrySuspendGlobalVarName, 1);
+      if(positionsCount > 0)
+        {
+         ClosePositions();
+         EnsurePositionCloseUpdate();
+        }
+      return;
+     }
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void ActivateProtection(const string message)
+  {
+   if(positionsCount > 0)
+    {
+      ClosePositions();
+      EnsurePositionCloseUpdate();
+    }
+
+   DeleteObjects();
+
+   accountProtectionMessage  = StringFormat("\n%s\nMagic number: %d\n", robotTagline, Magic_Number);
+   accountProtectionMessage += message + "\n";
+   accountProtectionMessage += "The current position was closed." + "\n";
+   accountProtectionMessage += "The Expert Advisor was turned off.";
+   Comment(accountProtectionMessage);
+   Print(accountProtectionMessage);
+
+   Sleep(20 * 1000);
+   ExpertRemove();
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void SetPosStats(void)
+  {
+   posStatCount = 0;
+   posStatLots  = 0;
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      const ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !PositionSelectByTicket(ticket))
+         continue;
+
+      posStatCount += 1;
+      posStatLots  += PositionGetDouble(POSITION_VOLUME);
+     }
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void UpdateStats(void)
+  {
+   string statsInfo = StringFormat("\n%s\nMagic number: %d\n", robotTagline, Magic_Number);
+
+   if(statusMessage != "")
+      statsInfo += "\n" + statusMessage;
+   if(Pos_Stat)
+      statsInfo += GetPositionStats() + "\n";
+   if(Robot_Stats)
+      statsInfo += GetRobotStats() + "\n";
+   if(Max_Spread   > sigma || Max_OpenPos > sigma || Max_OpenLots > sigma || MaxDailyLoss > sigma ||
+      Max_Daily_DD > sigma || Min_Equity  > sigma || Max_Equity   > sigma || MaxEquity_DD > sigma)
+      statsInfo += GetProtectionInfo();
+   if(News_Priority != NewsFilter_Disabled)
+      statsInfo += GetNewsText() + "\n";
+
+   RenderStats(statsInfo);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+string GetProtectionInfo(void)
+  {
+   string protectionInfo = "\n            ..:: Active Protections ::..\n";
+
+   if(Max_Spread > sigma)
+      protectionInfo += StringFormat("Max spread: %d, current: %d\n",
+                                     Max_Spread, (int)MathRound((Ask() - Bid()) / _Point));
+   if(Max_OpenPos > sigma)
+      protectionInfo += StringFormat("Max open positions: %d, current: %d\n",
+                                     Max_OpenPos, posStatCount);
+   if(Max_OpenLots > sigma)
+      protectionInfo += StringFormat("Max open lots: %.2f, current: %.2f\n",
+                                     Max_OpenLots, posStatLots);
+   if(MaxDailyLoss > sigma)
+      protectionInfo += StringFormat("Max daily loss: %d, current: %.2f\n",
+                                     MaxDailyLoss, dailyLoss);
+   if(Max_Daily_DD > sigma)
+      protectionInfo += StringFormat("Max daily drawdown: %.2f%%, current: %.2f%%\n",
+                                     Max_Daily_DD, dailyDrawdown);
+   if(Min_Equity > sigma)
+      protectionInfo += StringFormat("Min equity: %d, current: %.2f\n",
+                                     Min_Equity, AccountInfoDouble(ACCOUNT_EQUITY));
+   if(MaxEquity_DD > sigma)
+      protectionInfo += StringFormat("Max equity drawdown: %.2f%%, current: %.2f%%\n",
+                                     MaxEquity_DD, equityDrawdownPercent);
+   if(Max_Equity > sigma)
+      protectionInfo += StringFormat("Max equity: %d, current: %.2f\n",
+                                     Max_Equity, AccountInfoDouble(ACCOUNT_EQUITY));
+
+   return protectionInfo;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+string GetPositionStats(void)
+  {
+   const string positionStats  = "\n            ..:: Positions Stats ::..\n";
+
+   if(positionsCount == 0)
+      return positionStats +  "Positions: no open positions";
+
+   double totalLots         = 0;
+   double totalProfit       = 0;
+   double averagePriceOpen  = 0;
+   double averagePriceCurr  = 0;
+   double averageStopLoss   = 0;
+   double averageTakeProfit = 0;
+
+   for(int i = 0; i < positionsCount; i++)
+     {
+      const Position pos = positions[i];
+      totalLots         += pos.lots;
+      totalProfit       += pos.floatingProfit;
+      averagePriceOpen  += pos.priceOpen;
+      averagePriceCurr  += pos.priceCurrent;
+      averageStopLoss   += pos.stopLoss;
+      averageTakeProfit += pos.takeProfit;
+     }
+
+   averagePriceOpen  /= positionsCount;
+   averagePriceCurr  /= positionsCount;
+   averageStopLoss   /= positionsCount;
+   averageTakeProfit /= positionsCount;
+
+   return positionStats +
+          StringFormat("Positions: %s, Count: %d, Lots: %.2f, Profit %.2f\n",
+                       (positions[0].type == OP_BUY) ? "Long" : "Short",
+                       positionsCount,
+                       totalLots, totalProfit) +
+          StringFormat("Open price: %s, Current price: %s\n",
+                       DoubleToString(averagePriceOpen, _Digits),
+                       DoubleToString(averagePriceCurr, _Digits)) +
+          StringFormat("Stop Loss: %s, Take Profit: %s",
+                       DoubleToString(averageStopLoss,   _Digits),
+                       DoubleToString(averageTakeProfit, _Digits));
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+string GetRobotStats(void)
+  {
+   return "\n            ..:: Trading Stats ::..\n" +
+          "  1-day: " + GetRobotStatsDays(1) + "\n" +
+          "  7-day: " + GetRobotStatsDays(7) + "\n" +
+          "30-day: "  + GetRobotStatsDays(30);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+string GetRobotStatsDays(const int days)
+  {
+   double grossProfit     = 0;
+   double grossLoss       = 0;
+   int    histDealsCnt    = 0;
+   double histDealsProfit = 0;
+
+   const datetime timeCurrent = TimeCurrent();
+   const datetime timeStart   = timeCurrent - days * PeriodSeconds(PERIOD_D1);
+   HistorySelect(timeStart, timeCurrent);
+   const int deals = HistoryDealsTotal();
+
+   for(int i = 0; i < deals; i++)
+     {
+      const ulong ticket = HistoryDealGetTicket(i);
+      if(ticket == 0)
+         continue;
+
+      // When we close a position manually it gets dealMagic = 0
+      const long dealMagic = HistoryDealGetInteger(ticket, DEAL_MAGIC);
+      if(dealMagic > 0 && dealMagic != Magic_Number)
+         continue;
+
+      if(HistoryDealGetString(ticket, DEAL_SYMBOL) != _Symbol)
+         continue;
+
+      const long dealType = HistoryDealGetInteger(ticket, DEAL_TYPE);
+      if(dealType != DEAL_TYPE_BUY && dealType != DEAL_TYPE_SELL)
+         continue;
+
+      const long dealEntry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+      if(dealEntry != DEAL_ENTRY_OUT)
+         continue;
+
+      const double profit = HistoryDealGetDouble(ticket, DEAL_PROFIT) +
+                            HistoryDealGetDouble(ticket, DEAL_SWAP)   +
+                            HistoryDealGetDouble(ticket, DEAL_COMMISSION);
+
+      histDealsProfit += profit;
+      histDealsCnt    += 1;
+
+      if(profit > sigma)
+         grossProfit += profit;
+      if(profit < -sigma)
+         grossLoss -= profit;
+     }
+
+   const double profitFactor = grossLoss > sigma ? grossProfit / grossLoss : grossProfit;
+
+   return StringFormat("Trades: %d, Profit: %.2f, Profit factor: %.2f",
+                       histDealsCnt, histDealsProfit, profitFactor);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void RenderStats(const string text)
+  {
+   string lines[];
+   const int linesCount = StringSplit(text, '\n', lines);
+
+   uint lineWidth, lineHeight;
+   TextGetSize(robotTagline, lineWidth, lineHeight);
+
+   if(maxRectangles == 0)
+      RectLabelCreate(0, "Stats_background", 0, 0, 30, lineWidth,
+                      linesCount * lineHeight, GetChartBackColor(0));
+
+   const color foreColor = GetChartForeColor(0);
+   for(int i = 0; i < linesCount; i++)
+     {
+      if(lines[i] == "")
+         lines[i] = " ";
+      string labelName = "label" + IntegerToString(i);
+      if(i < maxLabels)
+         LabelUpdate(0, labelName, lines[i]);
+      else
+         LabelCreate(0, labelName, 0, 10, 20 + i * lineHeight,
+                     CORNER_LEFT_UPPER, lines[i], "Arial", 10, foreColor);
+
+      uint lnWidth, lnHeight;
+      TextGetSize(lines[i], lnWidth, lnHeight);
+      if(lnWidth > lineWidth)
+         lineWidth = lnWidth;
+     }
+   ObjectSetInteger(0, "Stats_background", OBJPROP_XSIZE,
+                    (int) MathRound(lineWidth * 0.90));
+   ObjectSetInteger(0, "Stats_background", OBJPROP_YSIZE,
+                    linesCount * lineHeight);
+   for(int i = linesCount; i < maxLabels; i++)
+      LabelUpdate(0, "label" + IntegerToString(i), " ");
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void RectLabelCreate(
+   const long             chartId    = 0,                 // chart's ID
+   const string           name       = "RectLabel",       // label name
+   const int              sub_window = 0,                 // sub-window index
+   const int              x          = 0,                 // X coordinate
+   const int              y          = 0,                 // Y coordinate
+   const int              width      = 50,                // width
+   const int              height     = 18,                // height
+   const color            back_clr   = clrBlack,          // background color
+   const ENUM_BORDER_TYPE border     = BORDER_SUNKEN,     // border type
+   const ENUM_BASE_CORNER corner     = CORNER_LEFT_UPPER, // chart corner for anchoring
+   const color            clr        = clrBlack,          // flat border color (Flat)
+   const ENUM_LINE_STYLE  style      = STYLE_SOLID,       // flat border style
+   const int              line_width = 0,                 // flat border width
+   const bool             back       = false,             // in the background
+   const bool             selection  = false,             // highlight to move
+   const bool             hidden     = true,              // hidden in the object list
+   const long             z_order    = 0)                 // priority for mouse click
+  {
+   if(!ObjectCreate(chartId, name, OBJ_RECTANGLE_LABEL, sub_window, 0, 0)) return;
+   maxRectangles += 1;
+   ObjectSetInteger(chartId, name, OBJPROP_XDISTANCE,   x);
+   ObjectSetInteger(chartId, name, OBJPROP_YDISTANCE,   y);
+   ObjectSetInteger(chartId, name, OBJPROP_XSIZE,       width);
+   ObjectSetInteger(chartId, name, OBJPROP_YSIZE,       height);
+   ObjectSetInteger(chartId, name, OBJPROP_BGCOLOR,     back_clr);
+   ObjectSetInteger(chartId, name, OBJPROP_BORDER_TYPE, border);
+   ObjectSetInteger(chartId, name, OBJPROP_CORNER,      corner);
+   ObjectSetInteger(chartId, name, OBJPROP_COLOR,       clr);
+   ObjectSetInteger(chartId, name, OBJPROP_STYLE,       style);
+   ObjectSetInteger(chartId, name, OBJPROP_WIDTH,       line_width);
+   ObjectSetInteger(chartId, name, OBJPROP_BACK,        back);
+   ObjectSetInteger(chartId, name, OBJPROP_SELECTABLE,  selection);
+   ObjectSetInteger(chartId, name, OBJPROP_SELECTED,    selection);
+   ObjectSetInteger(chartId, name, OBJPROP_HIDDEN,      hidden);
+   ObjectSetInteger(chartId, name, OBJPROP_ZORDER,      z_order);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void LabelCreate(
+   const long              chartId=0,                // chart's ID
+   const string            name="Label",             // label name
+   const int               sub_window=0,             // sub-window index
+   const int               x=0,                      // X coordinate
+   const int               y=0,                      // Y coordinate
+   const ENUM_BASE_CORNER  corner=CORNER_LEFT_UPPER, // chart corner for anchoring
+   const string            text="Label",             // text
+   const string            font="Arial",             // font
+   const int               font_size=10,             // font size
+   const color             clr=clrYellow,            // color
+   const double            angle=0.0,                // text slope
+   const ENUM_ANCHOR_POINT anchor=ANCHOR_LEFT_UPPER, // anchor type
+   const bool              back=false,               // in the background
+   const bool              selection=false,          // highlight to move
+   const bool              hidden=true,              // hidden in the object list
+   const long              z_order=0)                // priority for mouse click
+  {
+   if(!ObjectCreate(chartId, name, OBJ_LABEL, sub_window, 0 , 0)) return;
+   maxLabels += 1;
+   ObjectSetInteger(chartId, name, OBJPROP_XDISTANCE,  x);
+   ObjectSetInteger(chartId, name, OBJPROP_YDISTANCE,  y);
+   ObjectSetInteger(chartId, name, OBJPROP_CORNER,     corner);
+   ObjectSetString( chartId, name, OBJPROP_TEXT,       text);
+   ObjectSetString( chartId, name, OBJPROP_FONT,       font);
+   ObjectSetString( chartId, name, OBJPROP_TOOLTIP,    "\n");
+   ObjectSetInteger(chartId, name, OBJPROP_FONTSIZE,   font_size);
+   ObjectSetDouble( chartId, name, OBJPROP_ANGLE,      angle);
+   ObjectSetInteger(chartId, name, OBJPROP_ANCHOR,     anchor);
+   ObjectSetInteger(chartId, name, OBJPROP_COLOR,      clr);
+   ObjectSetInteger(chartId, name, OBJPROP_BACK,       back);
+   ObjectSetInteger(chartId, name, OBJPROP_SELECTABLE, selection);
+   ObjectSetInteger(chartId, name, OBJPROP_SELECTED,   selection);
+   ObjectSetInteger(chartId, name, OBJPROP_HIDDEN,     hidden);
+   ObjectSetInteger(chartId, name, OBJPROP_ZORDER,     z_order);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void LabelUpdate(const int chartId, const string name, const string text)
+  {
+   ObjectSetString(chartId, name, OBJPROP_TEXT, text);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+color GetChartForeColor(const long chartId=0)
+  {
+   long foreColor = clrWhite;
+   ChartGetInteger(chartId, CHART_COLOR_FOREGROUND, 0, foreColor);
+   return (color) foreColor;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+color GetChartBackColor(const long chartId=0)
+  {
+   long backColor = clrBlack;
+   ChartGetInteger(chartId, CHART_COLOR_BACKGROUND, 0, backColor);
+   return (color) backColor;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void DeleteObjects(void)
+  {
+   if(ObjectFind(0, "Stats_background") == 0)
+      ObjectDelete(0, "Stats_background");
+   maxLabels = MathMax(maxLabels, 100);
+   for(int i = 0; i < maxLabels; i++)
+     {
+      const string objName = "label" + IntegerToString(i);
+      if(ObjectFind(0, objName) == 0)
+         ObjectDelete(0, objName);
+     }
+   maxRectangles = 0;
+   maxLabels     = 0;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void InitGlobalVariables(void)
+  {
+   if(MQLInfoInteger(MQL_TESTER)) return;
+
+   const string accountNumberText = (string)AccountInfoInteger(ACCOUNT_LOGIN);
+
+   accMaxEquityGlobalVarName       = "Max_Equity_"         + accountNumberText;
+   accMaxDailyBalanceGlobalVarName = "Max_Daily_Balance_"  + accountNumberText;
+   accMaxDailyEquityGlobalVarName  = "Max_Daily_Equity_"   + accountNumberText;
+   accEntrySuspendGlobalVarName    = "Is_Entry_Suspended_" + accountNumberText;
+
+   if(!GlobalVariableCheck(accMaxEquityGlobalVarName))
+      GlobalVariableSet(accMaxEquityGlobalVarName, AccountInfoDouble(ACCOUNT_EQUITY));
+   if(!GlobalVariableCheck(accMaxDailyBalanceGlobalVarName))
+      GlobalVariableSet(accMaxDailyBalanceGlobalVarName, AccountInfoDouble(ACCOUNT_BALANCE));
+   if(!GlobalVariableCheck(accMaxDailyEquityGlobalVarName))
+      GlobalVariableSet(accMaxDailyEquityGlobalVarName, AccountInfoDouble(ACCOUNT_EQUITY));
+   if(!GlobalVariableCheck(accEntrySuspendGlobalVarName))
+      GlobalVariableSet(accEntrySuspendGlobalVarName, 0);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void ParseNewsCurrenciesText(void)
+  {
+   string parts[];
+   const int partsLen = StringSplit(News_Currencies, ',', parts);
+   ArrayResize(newsCurrencies, partsLen);
+   int index = 0;
+   for(int i = 0; i < partsLen; i++)
+     {
+      string part = parts[i];
+      StringReplace(part, " ", "");
+      if(StringLen(part) > 0)
+        {
+         newsCurrencies[index] = part;
+         index++;
+        }
+     }
+
+   ArrayResize(newsCurrencies, index);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void LoadNews(void)
+  {
+   const int currenciesCount = ArraySize(newsCurrencies);
+   datetime timeFrom = TimeTradeServer() - News_AfterHigh * 60;
+   datetime timeTo   = timeFrom + 24 * 60 * 60; // Next 24 hours
+
+   MqlCalendarEvent event;
+   MqlCalendarValue values[];
+   ArrayResize(newsRecords, 20);
+   int newsIndex = 0;
+
+   for(int i = 0; i < currenciesCount; i++)
+     {
+      const string currency = newsCurrencies[i];
+
+      const int valuesCount = CalendarValueHistory(values, timeFrom, timeTo, NULL, currency);
+
+      for(int j = 0; j < valuesCount; j++)
+        {
+         if(!CalendarEventById(values[j].event_id, event))
+            continue;
+         if(event.time_mode != CALENDAR_TIMEMODE_DATETIME &&
+            event.time_mode != CALENDAR_TIMEMODE_TENTATIVE)
+            continue;
+         if(event.importance != CALENDAR_IMPORTANCE_HIGH &&
+            event.importance != CALENDAR_IMPORTANCE_MODERATE)
+            continue;
+         if(News_Priority == NewsFilter_HighOnly &&
+            event.importance == CALENDAR_IMPORTANCE_MODERATE)
+            continue;
+
+         NewsRecord record;
+         record.time     = values[j].time;
+         record.priority = event.importance == CALENDAR_IMPORTANCE_HIGH ? "high" : "medium";
+         record.currency = currency;
+         record.title    = event.name;
+         newsRecords[newsIndex] = record;
+
+         newsIndex++;
+         if(newsIndex >= ArraySize(newsRecords))
+            ArrayResize(newsRecords, 2 * ArraySize(newsRecords));
+        }
+     }
+
+   ArrayResize(newsRecords, newsIndex);
+   SortNewsRecords();
+   lastNewsUpdate = TimeCurrent();
+  }
+//+------------------------------------------------------------------+
+//| Sorts the news records by event time                             |
+//+------------------------------------------------------------------+
+void SortNewsRecords(void)
+  {
+   datetime times[];
+   const int len = ArraySize(newsRecords);
+   ArrayResize(times, len);
+   for(int i = 0; i < len; i++)
+      times[i] = newsRecords[i].time;
+
+   ArraySort(times);
+
+   for(int i = 0; i < len; i++)
+     {
+      const datetime time = times[i];
+      for(int j = i; j < len; j++)
+         if(newsRecords[j].time == time)
+           {
+            if(i != j)
+              {
+               const NewsRecord tempRecord = newsRecords[i];
+               newsRecords[i] = newsRecords[j];
+               newsRecords[j] = tempRecord;
+              }
+            break;
+           }
+     }
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+string GetNewsText(void)
+  {
+   string newsText = "\n            ..:: Upcoming News ::..\n";
+   const datetime timeServer = TimeTradeServer();
+   const int newsLen = ArraySize(newsRecords);
+   for(int i = 0, count = 0; i < newsLen && count < News_ViewCount; i++)
+     {
+      const NewsRecord newsRecord = newsRecords[i];
+      if(newsRecord.time < timeServer - News_AfterHigh * 60)
+         continue;
+
+      const string newLine  = count > 0 ? "\n" : "";
+      const string newsTime = TimeToString(newsRecord.time, TIME_DATE | TIME_MINUTES);
+      const string priority = newsRecord.priority == "high" ? "[high]" : "[med]";
+      const string text     = StringFormat("%s%s %s %s %s", newLine, priority, newsTime,
+                                           newsRecord.currency, newsRecord.title);
+      StringAdd(newsText, text);
+      count++;
+     }
+
+   return newsText;
+  }
+//+------------------------------------------------------------------+
+//| Gets the index of an active news or -1                           |
+//+------------------------------------------------------------------+
+int NewsFilterActive(void)
+  {
+   if(News_Priority == NewsFilter_Disabled)
+      return -1;
+
+   const datetime timeServer = TimeTradeServer();
+   const int newsLen = ArraySize(newsRecords);
+
+   for(int i = 0; i < newsLen; i++)
+     {
+      const NewsRecord news = newsRecords[i];
+
+      if(news.priority == "high" &&
+         timeServer >= news.time - News_BeforeHigh * 60 - 15 &&
+         timeServer <= news.time + News_AfterHigh  * 60 + 15)
+         return i;
+
+      if(news.priority == "medium" &&
+         timeServer >= news.time - News_BeforeMedium * 60 - 15 &&
+         timeServer <= news.time + News_AfterMedium  * 60 + 15)
+         return i;
+     }
+
+   return -1;
+  }
+//+------------------------------------------------------------------+
+/*STRATEGY MARKET Premium; XAUUSD; M15 */
+/*STRATEGY CODE {"properties":{"entryLots":0.1,"tradeDirectionMode":0,"oppositeEntrySignal":1,"stopLoss":4000,"takeProfit":7000,"useStopLoss":true,"useTakeProfit":true,"isTrailingStop":false,"maxSpread":0},"timeUpdated":1780919100000,"openFilters":[{"name":"Entry Time","listIndexes":[0,0,0,0,0],"numValues":[1,0,23,0,0,0]},{"name":"Envelopes","listIndexes":[5,3,0,0,0],"numValues":[8,0.1,0,0,0,0]},{"name":"DeMarker","listIndexes":[2,0,0,0,0],"numValues":[35,0.45,0,0,0,0]},{"name":"MACD","listIndexes":[0,3,0,0,0],"numValues":[5,19,9,0,0,0]},{"name":"RSI","listIndexes":[2,3,0,0,0],"numValues":[34,45,0,0,0,0]},{"name":"RSI","listIndexes":[6,3,0,0,0],"numValues":[19,30,0,0,0,0]}],"closeFilters":[{"name":"Average True Range","listIndexes":[4,0,0,0,0],"numValues":[12,0.0015,0,0,0,0]}]} */
+
+
+
+void CreateRenewalButton()
+  {
+   string name = "BtnRenewLicense";
+   if(ObjectFind(0, name) >= 0) return;
+
+   ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, 20);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, 40);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, 220);
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, 34);
+   ObjectSetString(0, name, OBJPROP_TEXT, "🔗 Rinnova ora su WhatsApp");
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, clrRed);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clrWhite);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 9);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ChartRedraw(0);
+  }
+  
+  
+  void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
+  {
+   if(id == CHARTEVENT_OBJECT_CLICK && sparam == "BtnRenewLicense")
+     {
+      ShellExecuteW(0, "open", RenewalWhatsApp, "", "", 1);
+      ObjectSetInteger(0, "BtnRenewLicense", OBJPROP_STATE, false);
+     }
+  }
